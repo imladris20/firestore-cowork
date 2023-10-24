@@ -1,6 +1,6 @@
 {
   "hosting": {
-    "site": "firestore-polien-posting",
+    "site": "firestore-polien-posting-feature2",
     "public": "dist",
     "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
     "rewrites": [
