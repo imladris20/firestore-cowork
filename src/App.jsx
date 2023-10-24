@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
 import styled from "styled-components";
-import { v4 as uuidv4 } from "uuid";
 import "./App.css";
 import GoogleIcon from "./assets/google.png";
 import writing from "./assets/writing.gif";
@@ -8,12 +7,11 @@ import writing from "./assets/writing.gif";
 // Firebase Services
 import { initializeApp } from "firebase/app";
 import {
+  addDoc,
   collection,
-  doc,
   getFirestore,
   onSnapshot,
   serverTimestamp,
-  setDoc,
 } from "firebase/firestore";
 
 import { GoogleAuthProvider, getAuth, signInWithPopup } from "firebase/auth";
@@ -32,6 +30,8 @@ const firebaseApp = initializeApp(firebaseConfig);
 
 //  Initialize Firestore
 const db = getFirestore(firebaseApp);
+const articles = collection(db, "articles");
+const users = collection(db, "users");
 
 //  Authentication
 const auth = getAuth();
@@ -58,22 +58,31 @@ function App() {
 
   const handlePostArticle = async () => {
     try {
-      const id = uuidv4();
-      const docRef = doc(db, `articles/${id}`);
-      await setDoc(docRef, {
+      const newDoc = await addDoc(articles, {
         title,
         content,
         author_id: author,
         created_time: new serverTimestamp(),
         tag: currentTag,
-        id,
       });
       setTitle("");
       setAuthor("");
       setContent("");
       setCurrentTag("請選擇文章類別");
     } catch (e) {
-      console.error("Error adding document: ", e);
+      console.error("Error adding document to articles collection: ", e);
+    }
+  };
+
+  const handleAddUsers = async (name, email) => {
+    try {
+      const newUser = await addDoc(users, {
+        name,
+        email,
+      });
+      console.log("newUser", newUser);
+    } catch (e) {
+      console.error("Error adding document to articles collection: ", e);
     }
   };
 
@@ -93,8 +102,10 @@ function App() {
         // The signed-in user info.
         const user = result.user;
         console.log("result user", user);
+        const { displayName, email } = user;
         // IdP data available using getAdditionalUserInfo(result)
         // ...
+        handleAddUsers(displayName, email);
       })
       .catch((error) => {
         // Handle Errors here.
@@ -109,7 +120,7 @@ function App() {
   };
 
   useEffect(() => {
-    const unsub = onSnapshot(collection(db, "articles"), (querySnapshot) => {
+    const unsub = onSnapshot(articles, (querySnapshot) => {
       querySnapshot.forEach((doc) => {
         console.log("Current articles collection of Database: ", doc.data());
       });
