@@ -8,10 +8,18 @@ import writing from "./assets/writing.gif";
 import { initializeApp } from "firebase/app";
 import {
   addDoc,
+  arrayUnion,
   collection,
+  doc,
+  getDoc,
+  getDocs,
   getFirestore,
   onSnapshot,
+  query,
   serverTimestamp,
+  setDoc,
+  updateDoc,
+  where,
 } from "firebase/firestore";
 
 import { GoogleAuthProvider, getAuth, signInWithPopup } from "firebase/auth";
@@ -39,21 +47,32 @@ const provider = new GoogleAuthProvider();
 auth.languageCode = "zh-TW";
 
 function App() {
+  const MY_ID = "ooAwQWDtQddWl3R0zDCykekOS4e2";
   const [title, setTitle] = useState("");
   const [author, setAuthor] = useState("");
   const [content, setContent] = useState("");
+  const [targetEmail, setTargetEmail] = useState("");
   const [currentTag, setCurrentTag] = useState("請選擇文章類別");
+  const [userId, setUserId] = useState("");
+  const [userName, setUserName] = useState("");
+  const [userEmail, setUserEmail] = useState("");
+  const [friendsList, setFriendsList] = useState([]);
+  const [requestsList, setRequestsList] = useState([]);
 
   const handleTitleChange = (e) => {
     setTitle(e.target.value);
   };
 
-  const handleAuthorChange = (e) => {
-    setAuthor(e.target.value);
-  };
-
   const handleContentChange = (e) => {
     setContent(e.target.value);
+  };
+
+  const handleChangeTag = (e) => {
+    setCurrentTag(e.target.value);
+  };
+
+  const handleFriendsInput = (e) => {
+    setTargetEmail(e.target.value);
   };
 
   const handlePostArticle = async () => {
@@ -66,7 +85,6 @@ function App() {
         tag: currentTag,
       });
       setTitle("");
-      setAuthor("");
       setContent("");
       setCurrentTag("請選擇文章類別");
     } catch (e) {
@@ -74,38 +92,33 @@ function App() {
     }
   };
 
-  const handleAddUsers = async (name, email) => {
+  const handleAddUsers = async (name, email, uid) => {
     try {
-      const newUser = await addDoc(users, {
-        name,
-        email,
-      });
-      console.log("newUser", newUser);
+      const userRef = doc(db, `users/${uid}`);
+      const newUser = await setDoc(
+        userRef,
+        {
+          name,
+          email,
+          friends: [],
+          requests: [],
+        },
+        { merge: true }
+      );
     } catch (e) {
-      console.error("Error adding document to articles collection: ", e);
+      console.error("Error adding document to users collection: ", e);
     }
   };
 
-  const handleChangeTag = (event) => {
-    setCurrentTag(event.target.value);
-  };
-
   const handleGoogleLogin = () => {
-    console.log("click on google login");
     signInWithPopup(auth, provider)
       .then((result) => {
-        // This gives you a Google Access Token. You can use it to access the Google API.
         const credential = GoogleAuthProvider.credentialFromResult(result);
         const token = credential.accessToken;
         localStorage.setItem("GoogleAccessToken", token);
-        console.log("GoogleAccessToken", token);
-        // The signed-in user info.
-        const user = result.user;
-        console.log("result user", user);
-        const { displayName, email } = user;
-        // IdP data available using getAdditionalUserInfo(result)
-        // ...
-        handleAddUsers(displayName, email);
+        const { displayName, email, uid } = result.user;
+        handleAddUsers(displayName, email, uid);
+        setAuthor(uid);
       })
       .catch((error) => {
         // Handle Errors here.
@@ -115,21 +128,117 @@ function App() {
         const email = error.customData.email;
         // The AuthCredential type that was used.
         const credential = GoogleAuthProvider.credentialFromError(error);
-        // ...
+
+        console.error(errorCode, errorMessage, email, credential);
       });
   };
 
+  const handleSearchUsers = async () => {
+    setUserName(null);
+    async function queryingTargetUser() {
+      const userQuery = query(users, where("email", "==", targetEmail));
+      const querySnapshot = await getDocs(userQuery);
+      const matchUsers = querySnapshot.forEach((snap) => {
+        const { email, name } = snap.data();
+        setUserEmail(email);
+        setUserName(name);
+        setUserId(snap.id);
+        console.log(
+          `${name}'s information --> username: ${name}, useremail: ${email}, uid: ${snap.id}`
+        );
+      });
+    }
+    queryingTargetUser();
+    setTargetEmail("");
+  };
+
+  const handleAddFrieds = async () => {
+    console.log("click add friends");
+    const userRef = doc(db, `users/${userId}`);
+    const newData = {
+      requests: arrayUnion(MY_ID),
+    };
+
+    try {
+      await updateDoc(userRef, newData);
+      console.log("Data updated successfully.");
+    } catch (e) {
+      console.error("Error updating data: ", e);
+    }
+  };
+
   useEffect(() => {
-    const unsub = onSnapshot(articles, (querySnapshot) => {
+    const unsubArticles = onSnapshot(articles, (querySnapshot) => {
       querySnapshot.forEach((doc) => {
         console.log("Current articles collection of Database: ", doc.data());
       });
     });
 
+    const unsubUsers = onSnapshot(users, (querySnapshot) => {
+      querySnapshot.forEach((doc) => {
+        console.log("Current users collection of Database: ", doc.data());
+      });
+    });
+
+    const unsubMyDoc = onSnapshot(doc(db, `users/${MY_ID}`), (snapshot) => {
+      getFriendsList(snapshot);
+      getRequestsList(snapshot);
+    });
+
     return () => {
-      unsub();
+      unsubUsers();
+      unsubArticles();
+      unsubMyDoc();
     };
   }, []);
+
+  async function getFriendsList(snapshot) {
+    try {
+      const friendsArr = snapshot.data().friends;
+      const newFriendList = await Promise.all(
+        friendsArr.map(async (element, index) => {
+          const othersRef = doc(db, `users/${element}`);
+          const othersSnapShot = await getDoc(othersRef);
+          const othersData = othersSnapShot.data();
+          const { name, email } = othersData;
+          return (
+            <FlexRowContainer key={index}>
+              <h4>姓名：{name}</h4>
+              <h4>信箱：{email}</h4>
+            </FlexRowContainer>
+          );
+        })
+      );
+      setFriendsList(newFriendList);
+    } catch (error) {
+      console.error("Getting Friend List falied", error);
+    }
+  }
+
+  async function getRequestsList(snapshot) {
+    try {
+      const requestsArr = snapshot.data().requests;
+      const newRequestsList = await Promise.all(
+        requestsArr.map(async (element, index) => {
+          const othersRef = doc(db, `users/${element}`);
+          const othersSnapShot = await getDoc(othersRef);
+          const othersData = othersSnapShot.data();
+          console.log("othersData in requestsList", othersData);
+          const { name, email } = othersData;
+          return (
+            <FlexRowContainer key={index}>
+              <h5>姓名：{name}</h5>
+              <h5>信箱：{email}</h5>
+              <button>accept</button>
+            </FlexRowContainer>
+          );
+        })
+      );
+      setRequestsList(newRequestsList);
+    } catch (error) {
+      console.error("Getting Requests List falied", error);
+    }
+  }
 
   return (
     <>
@@ -144,16 +253,15 @@ function App() {
       <h1>Posting Your Articles!</h1>
       <GoogleLoginButton onClick={handleGoogleLogin}>
         <GoogleImg src={GoogleIcon}></GoogleImg>
-        <GoogleLoginText>使用Google 快速登入</GoogleLoginText>
+        <GoogleLoginText>
+          Google <br />
+          快速登入
+        </GoogleLoginText>
       </GoogleLoginButton>
       <AllInputContainer>
         <InputContainer>
           <TitleLabel>標題：</TitleLabel>
           <Title type="text" value={title} onChange={handleTitleChange} />
-        </InputContainer>
-        <InputContainer>
-          <TitleLabel>作者：</TitleLabel>
-          <Title type="text" value={author} onChange={handleAuthorChange} />
         </InputContainer>
         <InputContainer>
           <TagLabel>Tag：</TagLabel>
@@ -178,6 +286,31 @@ function App() {
         </ContentContainer>
         <Submit onClick={handlePostArticle}>發表文章</Submit>
       </AllInputContainer>
+      <h1>Do you have friends?</h1>
+      <h2>Your Friends：</h2>
+      {friendsList}
+      <h2>Your Pending Requests：</h2>
+      {requestsList}
+      <SearchContainer>
+        <TitleLabel>搜尋：</TitleLabel>
+        <FriendsContainer>
+          <Title
+            type="text"
+            value={targetEmail}
+            onChange={handleFriendsInput}
+          />
+          <Submit onClick={handleSearchUsers}>送出搜尋</Submit>
+        </FriendsContainer>
+      </SearchContainer>
+      {userName ? (
+        <>
+          <h2>用戶名：{userName}</h2>
+          <h2>用戶Email：{userEmail}</h2>
+          <Submit onClick={handleAddFrieds}>加入好友</Submit>
+        </>
+      ) : (
+        <h2>搜尋不到用戶QQ</h2>
+      )}
     </>
   );
 }
@@ -222,6 +355,10 @@ const ContentContainer = styled.div`
   flex-direction: column;
   gap: 5px;
   align-items: flex-start;
+`;
+
+const FriendsContainer = styled(InputContainer)`
+  margin-top: 5px;
 `;
 
 const ContentInput = styled.textarea`
@@ -284,8 +421,8 @@ const GoogleLoginButton = styled.button`
   display: flex;
   align-items: center;
   justify-content: space-around;
-  width: 300px;
-  height: 48px;
+  width: 200px;
+  height: 70px;
   margin: 0 auto 25px auto;
   background-color: #ffffff;
   color: black;
@@ -298,7 +435,7 @@ const GoogleLoginButton = styled.button`
 `;
 
 const GoogleImg = styled.img`
-  width: 40px;
+  width: 60px;
   padding-top: 2px;
 `;
 
@@ -306,4 +443,19 @@ const GoogleLoginText = styled.div`
   color: black;
   width: 245px;
   font-size: 20px;
+`;
+
+const SearchContainer = styled.div`
+  display: flex;
+  flex-direction: column;
+  margin-top: 40px;
+`;
+
+const FlexRowContainer = styled.div`
+  display: flex;
+  flex-direction: row;
+  justify-content: space-between;
+  margin-bottom: 15px;
+  height: 40px;
+  align-items: center;
 `;
