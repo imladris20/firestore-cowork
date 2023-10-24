@@ -1,20 +1,24 @@
-import "./App.css";
-import writing from "./assets/writing.gif";
-
+import { useEffect, useState } from "react";
 import styled from "styled-components";
 import { v4 as uuidv4 } from "uuid";
+import "./App.css";
+import GoogleIcon from "./assets/google.png";
+import writing from "./assets/writing.gif";
 
-// Import the functions you need from the SDKs you need
+// Firebase Services
 import { initializeApp } from "firebase/app";
 import {
   collection,
   doc,
   getFirestore,
   onSnapshot,
+  serverTimestamp,
   setDoc,
 } from "firebase/firestore";
-import { useEffect, useState } from "react";
 
+import { GoogleAuthProvider, getAuth, signInWithPopup } from "firebase/auth";
+
+//  Initialize Firebase
 const firebaseConfig = {
   apiKey: "AIzaSyA75IRqaTwXBiOX5cVkUEeM3tyl09EMsXI",
   authDomain: "test-firestore-polien.firebaseapp.com",
@@ -24,10 +28,15 @@ const firebaseConfig = {
   appId: "1:264671613600:web:1fb15821757b90404a6fc5",
   measurementId: "G-KDE5BW1C7K",
 };
-
-// Initialize Firebase
 const firebaseApp = initializeApp(firebaseConfig);
+
+//  Initialize Firestore
 const db = getFirestore(firebaseApp);
+
+//  Authentication
+const auth = getAuth();
+const provider = new GoogleAuthProvider();
+auth.languageCode = "zh-TW";
 
 function App() {
   const [title, setTitle] = useState("");
@@ -55,7 +64,7 @@ function App() {
         title,
         content,
         author_id: author,
-        created_time: new Date(),
+        created_time: new serverTimestamp(),
         tag: currentTag,
         id,
       });
@@ -70,6 +79,33 @@ function App() {
 
   const handleChangeTag = (event) => {
     setCurrentTag(event.target.value);
+  };
+
+  const handleGoogleLogin = () => {
+    console.log("click on google login");
+    signInWithPopup(auth, provider)
+      .then((result) => {
+        // This gives you a Google Access Token. You can use it to access the Google API.
+        const credential = GoogleAuthProvider.credentialFromResult(result);
+        const token = credential.accessToken;
+        localStorage.setItem("GoogleAccessToken", token);
+        console.log("GoogleAccessToken", token);
+        // The signed-in user info.
+        const user = result.user;
+        console.log("result user", user);
+        // IdP data available using getAdditionalUserInfo(result)
+        // ...
+      })
+      .catch((error) => {
+        // Handle Errors here.
+        const errorCode = error.code;
+        const errorMessage = error.message;
+        // The email of the user's account used.
+        const email = error.customData.email;
+        // The AuthCredential type that was used.
+        const credential = GoogleAuthProvider.credentialFromError(error);
+        // ...
+      });
   };
 
   useEffect(() => {
@@ -88,13 +124,17 @@ function App() {
     <>
       <div>
         <a
-          href="https://firebase.google.com/docs/firestore/quickstart?hl=zh-tw&authuser=0"
+          href="https://console.firebase.google.com/u/3/project/test-firestore-polien/firestore/data"
           target="_blank"
         >
           <img src={writing} className="logo react" alt="Writing logo" />
         </a>
       </div>
       <h1>Posting Your Articles!</h1>
+      <GoogleLoginButton onClick={handleGoogleLogin}>
+        <GoogleImg src={GoogleIcon}></GoogleImg>
+        <GoogleLoginText>使用Google 快速登入</GoogleLoginText>
+      </GoogleLoginButton>
       <AllInputContainer>
         <InputContainer>
           <TitleLabel>標題：</TitleLabel>
@@ -227,4 +267,32 @@ const TagSelect = styled.select`
 
 const TagOption = styled.option`
   width: 200px;
+`;
+
+const GoogleLoginButton = styled.button`
+  display: flex;
+  align-items: center;
+  justify-content: space-around;
+  width: 300px;
+  height: 48px;
+  margin: 0 auto 25px auto;
+  background-color: #ffffff;
+  color: black;
+  border-radius: 15px;
+  border: 1px #979797 solid;
+  cursor: pointer;
+  position: absolute;
+  top: 50px;
+  right: 15px;
+`;
+
+const GoogleImg = styled.img`
+  width: 40px;
+  padding-top: 2px;
+`;
+
+const GoogleLoginText = styled.div`
+  color: black;
+  width: 245px;
+  font-size: 20px;
 `;

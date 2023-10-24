@@ -3,6 +3,7 @@
   margin: 0;
   padding: 2rem;
   height: 1080px;
+  position: relative;
 }
 
 .logo {
