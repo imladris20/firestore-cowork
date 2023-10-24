@@ -1,0 +1,13 @@
+{
+  "hosting": {
+    "site": "firestore-polien-posting",
+    "public": "dist",
+    "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
+    "rewrites": [
+      {
+        "source": "**",
+        "destination": "/index.html"
+      }
+    ]
+  }
+}
