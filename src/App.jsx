@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import styled from "styled-components";
 import "./App.css";
+import ExitIcon from "./assets/exit.png";
 import GoogleIcon from "./assets/google.png";
 import writing from "./assets/writing.gif";
 
@@ -8,6 +9,7 @@ import writing from "./assets/writing.gif";
 import { initializeApp } from "firebase/app";
 import {
   addDoc,
+  arrayRemove,
   arrayUnion,
   collection,
   doc,
@@ -15,6 +17,7 @@ import {
   getDocs,
   getFirestore,
   onSnapshot,
+  orderBy,
   query,
   serverTimestamp,
   setDoc,
@@ -47,7 +50,10 @@ const provider = new GoogleAuthProvider();
 auth.languageCode = "zh-TW";
 
 function App() {
-  const MY_ID = "ooAwQWDtQddWl3R0zDCykekOS4e2";
+  const POLIEN_ID = "ooAwQWDtQddWl3R0zDCykekOS4e2";
+  const [currentUserId, setCurrentUserId] = useState(
+    localStorage.getItem("uid")
+  );
   const [title, setTitle] = useState("");
   const [author, setAuthor] = useState("");
   const [content, setContent] = useState("");
@@ -58,6 +64,8 @@ function App() {
   const [userEmail, setUserEmail] = useState("");
   const [friendsList, setFriendsList] = useState([]);
   const [requestsList, setRequestsList] = useState([]);
+  const [isSearched, setIsSearched] = useState(false);
+  const [currentArticlesList, setCurrentArticlesList] = useState([]);
 
   const handleTitleChange = (e) => {
     setTitle(e.target.value);
@@ -92,7 +100,7 @@ function App() {
     }
   };
 
-  const handleAddUsers = async (name, email, uid) => {
+  const handleAddUserToFirestore = async (name, email, uid) => {
     try {
       const userRef = doc(db, `users/${uid}`);
       const newUser = await setDoc(
@@ -117,8 +125,10 @@ function App() {
         const token = credential.accessToken;
         localStorage.setItem("GoogleAccessToken", token);
         const { displayName, email, uid } = result.user;
-        handleAddUsers(displayName, email, uid);
+        localStorage.setItem("uid", uid);
+        handleAddUserToFirestore(displayName, email, uid);
         setAuthor(uid);
+        setCurrentUserId(uid);
       })
       .catch((error) => {
         // Handle Errors here.
@@ -133,8 +143,15 @@ function App() {
       });
   };
 
+  const handleLogout = () => {
+    setAuthor(null);
+    setCurrentUserId(null);
+    localStorage.removeItem("uid");
+  };
+
   const handleSearchUsers = async () => {
     setUserName(null);
+    setIsSearched(true);
     async function queryingTargetUser() {
       const userQuery = query(users, where("email", "==", targetEmail));
       const querySnapshot = await getDocs(userQuery);
@@ -149,30 +166,49 @@ function App() {
       });
     }
     queryingTargetUser();
-    setTargetEmail("");
   };
 
-  const handleAddFrieds = async () => {
-    console.log("click add friends");
+  const handleSendRequestToAddFrieds = async () => {
+    if (currentUserId) console.log("Send Request to add friends");
     const userRef = doc(db, `users/${userId}`);
     const newData = {
-      requests: arrayUnion(MY_ID),
+      requests: arrayUnion(currentUserId),
     };
 
     try {
       await updateDoc(userRef, newData);
       console.log("Data updated successfully.");
-    } catch (e) {
-      console.error("Error updating data: ", e);
+    } catch (error) {
+      console.error("Error updating data: ", error);
     }
   };
 
   useEffect(() => {
-    const unsubArticles = onSnapshot(articles, (querySnapshot) => {
-      querySnapshot.forEach((doc) => {
-        console.log("Current articles collection of Database: ", doc.data());
-      });
-    });
+    if (!currentUserId) {
+      return;
+    }
+
+    const unsubArticles = onSnapshot(
+      query(articles, orderBy("created_time", "desc")),
+      async (querySnapshot) => {
+        const articlesArr = querySnapshot.docs.map((doc, index) => {
+          const singleArticle = doc.data();
+          console.log(singleArticle);
+          return (
+            <Article key={index}>
+              <ArticleTitle>標題：{singleArticle.title}</ArticleTitle>
+              <ArticleAuthor>作者id：{singleArticle.author_id}</ArticleAuthor>
+              <ArticleTag>類別：{singleArticle.tag}</ArticleTag>
+              <ArticleContentLabel>內文：</ArticleContentLabel>
+              <ArticleContent>{singleArticle.content}</ArticleContent>
+            </Article>
+          );
+        });
+
+        console.log("articlesArr", articlesArr);
+        setCurrentArticlesList(articlesArr);
+      }
+    );
 
     const unsubUsers = onSnapshot(users, (querySnapshot) => {
       querySnapshot.forEach((doc) => {
@@ -180,17 +216,20 @@ function App() {
       });
     });
 
-    const unsubMyDoc = onSnapshot(doc(db, `users/${MY_ID}`), (snapshot) => {
-      getFriendsList(snapshot);
-      getRequestsList(snapshot);
-    });
+    const unsubCurrentUserDoc = onSnapshot(
+      doc(db, `users/${currentUserId}`),
+      (snapshot) => {
+        getFriendsList(snapshot);
+        getRequestsList(snapshot);
+      }
+    );
 
     return () => {
       unsubUsers();
       unsubArticles();
-      unsubMyDoc();
+      unsubCurrentUserDoc();
     };
-  }, []);
+  }, [currentUserId]);
 
   async function getFriendsList(snapshot) {
     try {
@@ -229,7 +268,12 @@ function App() {
             <FlexRowContainer key={index}>
               <h5>姓名：{name}</h5>
               <h5>信箱：{email}</h5>
-              <button>accept</button>
+              <RequestAcceptBtn onClick={() => handleAcceptRequest(element)}>
+                accept
+              </RequestAcceptBtn>
+              <RequestDeclineBtn onClick={() => handleDeclineRequest(element)}>
+                declined
+              </RequestDeclineBtn>
             </FlexRowContainer>
           );
         })
@@ -237,6 +281,48 @@ function App() {
       setRequestsList(newRequestsList);
     } catch (error) {
       console.error("Getting Requests List falied", error);
+    }
+  }
+
+  async function handleAcceptRequest(toId) {
+    const userRef = doc(db, `users/${toId}`);
+    const currentUserRef = doc(db, `users/${currentUserId}`);
+
+    const userNewData = {
+      friends: arrayUnion(currentUserId),
+    };
+
+    const currentUserNewData = {
+      friends: arrayUnion(toId),
+    };
+
+    const requestToRemove = {
+      requests: arrayRemove(toId),
+    };
+
+    try {
+      await updateDoc(userRef, userNewData);
+      await updateDoc(currentUserRef, currentUserNewData);
+      console.log("Add new friend to friend list successfully.");
+      await updateDoc(currentUserRef, requestToRemove);
+      console.log("Remove request successfully.");
+    } catch (error) {
+      console.error("Error occurred in accepting request: ", error);
+    }
+  }
+
+  async function handleDeclineRequest(toId) {
+    const currentUserRef = doc(db, `users/${currentUserId}`);
+
+    const requestToRemove = {
+      requests: arrayRemove(toId),
+    };
+
+    try {
+      await updateDoc(currentUserRef, requestToRemove);
+      console.log("Remove request successfully.");
+    } catch (error) {
+      console.error("Error occurred in accepting request: ", error);
     }
   }
 
@@ -251,65 +337,91 @@ function App() {
         </a>
       </div>
       <h1>Posting Your Articles!</h1>
-      <GoogleLoginButton onClick={handleGoogleLogin}>
-        <GoogleImg src={GoogleIcon}></GoogleImg>
-        <GoogleLoginText>
-          Google <br />
-          快速登入
-        </GoogleLoginText>
-      </GoogleLoginButton>
-      <AllInputContainer>
-        <InputContainer>
-          <TitleLabel>標題：</TitleLabel>
-          <Title type="text" value={title} onChange={handleTitleChange} />
-        </InputContainer>
-        <InputContainer>
-          <TagLabel>Tag：</TagLabel>
-          <TagSelect
-            value={currentTag}
-            name="tag"
-            onChange={(event) => handleChangeTag(event)}
-          >
-            <TagOption>請選擇文章類別</TagOption>
-            <TagOption>Beauty</TagOption>
-            <TagOption>Gossiping</TagOption>
-            <TagOption>SchoolLife</TagOption>
-          </TagSelect>
-        </InputContainer>
-        <ContentContainer>
-          <TitleLabel>內容：</TitleLabel>
-          <ContentInput
-            type="text"
-            value={content}
-            onChange={handleContentChange}
-          />
-        </ContentContainer>
-        <Submit onClick={handlePostArticle}>發表文章</Submit>
-      </AllInputContainer>
-      <h1>Do you have friends?</h1>
-      <h2>Your Friends：</h2>
-      {friendsList}
-      <h2>Your Pending Requests：</h2>
-      {requestsList}
-      <SearchContainer>
-        <TitleLabel>搜尋：</TitleLabel>
-        <FriendsContainer>
-          <Title
-            type="text"
-            value={targetEmail}
-            onChange={handleFriendsInput}
-          />
-          <Submit onClick={handleSearchUsers}>送出搜尋</Submit>
-        </FriendsContainer>
-      </SearchContainer>
-      {userName ? (
+      {!currentUserId ? (
         <>
-          <h2>用戶名：{userName}</h2>
-          <h2>用戶Email：{userEmail}</h2>
-          <Submit onClick={handleAddFrieds}>加入好友</Submit>
+          <GoogleLoginButton onClick={handleGoogleLogin}>
+            <GoogleImg src={GoogleIcon}></GoogleImg>
+            <GoogleLoginText>
+              Google <br />
+              快速登入
+            </GoogleLoginText>
+          </GoogleLoginButton>
         </>
       ) : (
-        <h2>搜尋不到用戶QQ</h2>
+        <>
+          <AllInputContainer>
+            <InputContainer>
+              <TitleLabel>標題：</TitleLabel>
+              <Title type="text" value={title} onChange={handleTitleChange} />
+            </InputContainer>
+            <InputContainer>
+              <TagLabel>Tag：</TagLabel>
+              <TagSelect
+                value={currentTag}
+                name="tag"
+                onChange={(event) => handleChangeTag(event)}
+              >
+                <TagOption>請選擇文章類別</TagOption>
+                <TagOption>Beauty</TagOption>
+                <TagOption>Gossiping</TagOption>
+                <TagOption>SchoolLife</TagOption>
+              </TagSelect>
+            </InputContainer>
+            <ContentContainer>
+              <TitleLabel>內容：</TitleLabel>
+              <ContentInput
+                type="text"
+                value={content}
+                onChange={handleContentChange}
+              />
+            </ContentContainer>
+            <Submit onClick={handlePostArticle}>發表文章</Submit>
+          </AllInputContainer>
+          <h1>Articles</h1>
+          <ArticlesContainer>
+            {/* <SearchContainer>
+              <TitleLabel>搜尋：</TitleLabel>
+              <FriendsContainer>
+                <Title
+                  type="text"
+                  value={targetEmail}
+                  onChange={handleFriendsInput}
+                />
+                <Submit onClick={handleSearchUsers}>送出搜尋</Submit>
+              </FriendsContainer>
+            </SearchContainer> */}
+            {currentArticlesList}
+          </ArticlesContainer>
+          <h1>Do you have friends?</h1>
+          <h2>Your Friends：</h2>
+          {friendsList.length ? friendsList : null}
+          <h2>Your Pending Requests：</h2>
+          {requestsList.length ? requestsList : null}
+          <SearchContainer>
+            <TitleLabel>搜尋：</TitleLabel>
+            <FriendsContainer>
+              <Title
+                type="text"
+                value={targetEmail}
+                onChange={handleFriendsInput}
+              />
+              <Submit onClick={handleSearchUsers}>送出搜尋</Submit>
+            </FriendsContainer>
+          </SearchContainer>
+          {userName ? (
+            <>
+              <h3>用戶名：{userName}</h3>
+              <h3>用戶Email：{userEmail}</h3>
+              <Submit onClick={handleSendRequestToAddFrieds}>加入好友</Submit>
+            </>
+          ) : (
+            <NoUserText $isSearched={isSearched}>搜尋不到用戶QQ</NoUserText>
+          )}
+          <LogoutButton onClick={handleLogout}>
+            <LogoutImg src={ExitIcon}></LogoutImg>
+            <GoogleLoginText>登出</GoogleLoginText>
+          </LogoutButton>
+        </>
       )}
     </>
   );
@@ -429,9 +541,26 @@ const GoogleLoginButton = styled.button`
   border-radius: 15px;
   border: 1px #979797 solid;
   cursor: pointer;
-  position: absolute;
+  /* position: absolute;
   top: 50px;
-  right: 15px;
+  right: 15px; */
+`;
+
+const LogoutButton = styled.button`
+  display: flex;
+  align-items: center;
+  justify-content: space-around;
+  width: 200px;
+  height: 70px;
+  margin: 15px auto 25px auto;
+  background-color: #ffffff;
+  color: black;
+  border-radius: 15px;
+  border: 1px #979797 solid;
+  cursor: pointer;
+  /* position: absolute;
+  top: 50px;
+  right: 15px; */
 `;
 
 const GoogleImg = styled.img`
@@ -443,6 +572,11 @@ const GoogleLoginText = styled.div`
   color: black;
   width: 245px;
   font-size: 20px;
+`;
+
+const LogoutImg = styled.img`
+  width: 40px;
+  padding-top: 2px;
 `;
 
 const SearchContainer = styled.div`
@@ -458,4 +592,55 @@ const FlexRowContainer = styled.div`
   margin-bottom: 15px;
   height: 40px;
   align-items: center;
+`;
+
+const NoUserText = styled.h3`
+  visibility: ${(props) => (props.$isSearched ? "visible" : "hidden")};
+`;
+
+const RequestAcceptBtn = styled.button`
+  width: 70px;
+  font-size: 14px;
+  background-color: lightblue;
+  padding: 5px 5px 5px 5px;
+`;
+
+const RequestDeclineBtn = styled(RequestAcceptBtn)`
+  background-color: lightpink;
+  color: grey;
+`;
+
+const ArticlesContainer = styled.div`
+  display: flex;
+  flex-direction: column;
+  margin: 10px auto;
+`;
+
+const Article = styled.div`
+  display: flex;
+  flex-direction: column;
+  border: 1px solid lightgrey;
+  border-radius: 5px;
+  margin-bottom: 30px;
+  padding: 15px;
+`;
+
+const ArticleTitle = styled.h2`
+  margin: 0 0 10px 0;
+`;
+
+const ArticleAuthor = styled.h3`
+  margin: 0;
+`;
+
+const ArticleTag = styled.h3`
+  margin: 0;
+`;
+
+const ArticleContentLabel = styled.h2`
+  margin: 20px 0 5px 0;
+`;
+
+const ArticleContent = styled.p`
+  margin: 0;
 `;
